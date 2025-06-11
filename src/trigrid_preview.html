@@ -1,0 +1,169 @@
+<body>
+    <h1 id="loading">Loading ...</h1>
+    <div id="settings">
+
+    </div>
+    <canvas width="1920" height="1080" id="main-canvas"></canvas>
+</body>
+
+<script src="./js/glshader_ext.js"></script>
+<script src="./js/canvas2d_ext.js"></script>
+
+<script>
+    const $ = document.querySelector.bind(document);
+    const cv = document.getElementById("main-canvas");
+    const ctx = cv.getContext("2d");
+    const mainShaderLoader = new ShaderLoader();
+    var trigrid_base;
+    var bg;
+
+    const load_img = async src => {
+        const img = new Image();
+        const loadp = new Promise((resolve) => {
+            img.onload = resolve;
+        });
+        img.src = src;
+        img.setAttribute("crossOrigin", "anonymous");
+        await loadp;
+        return img;
+    };
+
+    const setting_widgets = {};
+
+    const add_widget = (name, type, options) => {
+        if (type == "vec") {
+            options.min ||= [];
+            options.max ||= [];
+            options.default ||= [];
+
+            const ele = document.createElement("div");
+            const inputs = [];
+            ele.appendChild(document.createTextNode(`(vec${options.n}) ${name}: `));
+            const vecs = new Array(options.n).fill(0).map((_, i) => {
+                const input_ele = document.createElement("input");
+                input_ele.type = "range";
+                input_ele.min = options.min[i] || 0.;
+                input_ele.max = options.max[i] || 1.;
+                input_ele.step = 0.01;
+                input_ele.value = options.default[i] || 0.;
+                input_ele.update = () => {
+                    label.innerText = parseFloat(input_ele.value).toFixed(2);
+                };
+                const label = document.createElement("label");
+                input_ele.addEventListener("input", input_ele.update);
+                input_ele.update();
+                ele.appendChild(label);
+                ele.appendChild(document.createTextNode(" "));
+                ele.appendChild(input_ele);
+                ele.appendChild(document.createTextNode(" "));
+                inputs.push(input_ele);
+            });
+            ele.getValue = () => vecs.map((v, i) => parseFloat(inputs[i].value));
+            setting_widgets[name] = ele;
+            $("#settings").appendChild(ele);
+        } else if (type == "float") {
+            options.min ||= 0.;
+            options.max ||= 1.;
+            options.default ||= 0.;
+
+            const ele = document.createElement("div");
+            const input_ele = document.createElement("input");
+            input_ele.type = "range";
+            input_ele.min = options.min;
+            input_ele.max = options.max;
+            input_ele.step = 0.01;
+            input_ele.value = options.default;
+            input_ele.update = () => {
+                label.innerText = parseFloat(input_ele.value).toFixed(2);
+            };
+            const label = document.createElement("label");
+            input_ele.addEventListener("input", input_ele.update);
+            input_ele.update();
+
+            ele.appendChild(document.createTextNode(`(float) ${name}: `));
+            ele.appendChild(label);
+            ele.appendChild(input_ele);
+
+            ele.getValue = () => parseFloat(input_ele.value);
+            setting_widgets[name] = ele;
+            $("#settings").appendChild(ele);
+        } else if (type == "bool") {
+            options.default ||= false;
+
+            const ele = document.createElement("div");
+            const input_ele = document.createElement("input");
+            input_ele.type = "checkbox";
+            input_ele.checked = options.default;
+            input_ele.update = () => {
+                label.innerText = input_ele.checked;
+            };
+            const label = document.createElement("label");
+            input_ele.addEventListener("input", input_ele.update);
+            input_ele.update();
+
+            ele.appendChild(document.createTextNode(`(bool) ${name}: `));
+            ele.appendChild(label);
+            ele.appendChild(input_ele);
+
+            ele.getValue = () => input_ele.checked;
+            setting_widgets[name] = ele;
+            $("#settings").appendChild(ele);
+        }
+    };
+
+    add_widget("tex_size", "vec", { n: 2, default: [0.2, 0.25] });
+    add_widget("base_color", "vec", { n: 4, default: [0.018, 0.018, 0.018, 0.4] });
+    add_widget("face_color", "vec", { n: 4, default: [0.702, 0.9449554, 1, 1] });
+    add_widget("face_brightness", "float", { default: 0.1, max: 3.0 });
+    add_widget("grid_color", "vec", { n: 4, default: [1, 1, 1, 1] });
+    add_widget("grid_brightness", "float", { default: 0.4, max: 3.0 });
+    add_widget("glow_color", "vec", { n: 4, default: [0.383, 0.8843222, 1, 1] });
+    add_widget("glow_brightness", "float", { default: 0.71, max: 3.0 });
+
+    add_widget("always_on", "bool", { default: false });
+    add_widget("glow_ooroff", "bool", { default: false });
+
+    setting_widgets.get = (names) => {
+        const values = {
+            t: performance.now() / 1000
+        };
+        for (const name of names) {
+            values[name] = setting_widgets[name].getValue();
+        }
+        return values;
+    };
+
+    const draw = () => {
+        ctx.clear();
+        ctx.drawImage(trigrid_base, 0, 0, cv.width, cv.height);
+        mainShaderLoader.renderToCanvas(ctx, "trigrid", setting_widgets.get([
+            "tex_size",
+            "base_color",
+            "face_color",
+            "face_brightness",
+            "grid_color",
+            "grid_brightness",
+            "glow_color",
+            "glow_brightness",
+            "always_on",
+            "glow_ooroff"
+        ]));
+
+        ctx.save();
+        ctx.globalCompositeOperation = "destination-over";
+        ctx.drawImage(bg, 0, 0, cv.width, cv.height);
+        ctx.restore();
+
+        requestAnimationFrame(draw);
+    };
+
+    (async () => {
+        mainShaderLoader.load("trigrid", await (await fetch("./shaders/trigrid.glsl")).text());
+        trigrid_base = await load_img("./resources/TriGridBase.png");
+        bg = await load_img("./resources/AllSongBlur.png");
+
+        $("#loading").remove();
+
+        requestAnimationFrame(draw);
+    })();
+</script>

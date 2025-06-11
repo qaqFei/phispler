@@ -1,0 +1,281 @@
+<html>
+<body>
+    <label for="render_method">choose render method: </label>
+    <select name="render_method" id="render_method">
+        <option value="one_frame">one frame</option>
+        <option value="multi_frame">multi frame</option>
+    </select>
+
+    <button id="render_button">render</button>
+    <br>
+    <label for="render_script">render script path: </label>
+    <input type="text" name="render_script" id="render_script" value="./dev_animation_editor_renders/exmple.js">
+
+    <br><br>
+
+    <div id="multi_frame_options">
+        <label for="multi_frame_fps">multi frame fps: </label>
+        <input type="number" name="multi_frame_fps" id="multi_frame_fps" value="60">
+        <br>
+        <label for="multi_frame_dur">multi frame dur (s): </label>
+        <input type="number" name="multi_frame_dur" id="multi_frame_dur" value="1.0">
+        <br>
+        <label for="multi_frame_nowtime">multi frame now time (frame): </label>
+        <input type="range" name="multi_frame_nowtime" id="multi_frame_nowtime" value="0.0">
+        <label id="multi_frame_nowtime_label">0.0</label>
+
+        <br>
+    </div>
+
+    <label>resources: </label>
+    <table id="resources_table">
+        <thead>
+            <tr>
+                <th>name</th>
+                <th>path</th>
+            </tr>
+        </thead>
+        <tbody id="resources_table_tbody"></tbody>
+    </table>
+
+    <button id="add_resources_button">add resource</button>
+    <button id="load_resources_button">load resources</button>
+
+    <br>
+    <button id="export">export</button>
+
+    <br><br>
+
+    <canvas class="main-canvas"></canvas>
+
+    <svg width="0" height="0" xmlns="http://www.w3.org/2000/svg">
+        <filter id="textureLineColorFilter">
+            <feColorMatrix type="matrix" values="
+                1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 1 0
+            " id="colorMatrix"></feColorMatrix>
+        </filter>
+    </svg>
+</body>
+</html>
+
+<style>
+    .main-canvas {
+        z-index: 1;
+        background-color: black;
+        /* background-image: url("./resources/transparent_blocks.png"); */
+        /* background-size: 16px 16px; */
+        /* background-repeat: repeat; */
+    }
+
+    table {
+        width: 70%;
+        border-collapse: collapse;
+        font-family: Arial, sans-serif;
+        margin-bottom: 25px;
+        font-size: 0.9em;
+        font-weight: bold;
+        box-shadow: 0 0 20px rgba(0, 0, 0, 0.15);
+    }
+
+    table thead tr {
+        background-color: #009879;
+        color: #ffffff;
+        text-align: left;
+    }
+
+    table th, table td {
+        padding: 12px 15px;
+    }
+
+    table tbody tr {
+        border-bottom: 1px solid #dddddd;
+    }
+
+    table tbody tr:nth-of-type(even) {
+        background-color: #f3f3f3;
+    }
+
+    table tbody tr:last-of-type {
+        border-bottom: 2px solid #009879;
+    }
+
+    table tbody tr.active-row {
+        font-weight: bold;
+        color: #009879;
+    }
+</style>
+
+<script src="./js/canvas2d_ext.js"></script>
+
+<script>
+    $ = x => document.querySelector(x);
+    cv = $(".main-canvas");
+    ctx = cv.getContext("2d");
+    const resources = [];
+
+    const render_datas = {
+        note_deg: 62,
+        get_dpower: (w, h, deg) => {
+            if (w == 0.0) return 1.0;
+            const sw = h / Math.tan(deg * Math.PI / 180);
+            return sw / w;
+        },
+        note_draw_render_scale: 1,
+        note_render_flick_deg: 30
+    };
+
+    function resizeCanvas(w, h) {
+        cv.width = w;
+        cv.height = h;
+    }
+
+    function get_render_cfg() {
+        return {
+            render_method: $("#render_method").value,
+            render_script: $("#render_script").value,
+            multi_frame_fps: parseFloat($("#multi_frame_fps").value),
+            multi_frame_dur: parseFloat($("#multi_frame_dur").value)
+        };
+    }
+
+    running_multi_frame_render = false;
+
+    render_method = "one_frame";
+    function update_render_method() {
+        const cfg = get_render_cfg();
+        render_method = cfg.render_method;
+        $("#multi_frame_nowtime").min = 0;
+        $("#multi_frame_nowtime").max = cfg.multi_frame_dur * cfg.multi_frame_fps;
+        $("#multi_frame_nowtime").value = 0;
+
+        $("#multi_frame_options").style.display = render_method != "multi_frame" ? "none" : "block";
+        update_multi_render_nowtime_label();
+    }
+
+    function multi_frame_next_frame() {
+        const cfg = get_render_cfg();
+        const nowtime = parseFloat($("#multi_frame_nowtime").value);
+        set_multi_frame_frame_num(nowtime + 1);
+    }
+
+    function set_multi_frame_frame_num(n) {
+        const cfg = get_render_cfg();
+        $("#multi_frame_nowtime").value = n;
+        if (n >= cfg.multi_frame_dur * cfg.multi_frame_fps) {
+            $("#multi_frame_nowtime").value = 0;
+        }
+        update_multi_render_nowtime_label();
+    }
+    
+    function update_multi_render_nowtime_label() {
+        const cfg = get_render_cfg();
+        $("#multi_frame_nowtime_label").innerText = ($("#multi_frame_nowtime").value / cfg.multi_frame_fps).toFixed(2);
+    }
+
+    function render_noce(render_p) {
+        if (!window.render) return;
+        const cfg = get_render_cfg();
+        if (render_method == "one_frame") render.call(Object.assign(window, render_datas));
+        else render((render_p === undefined) ? ($("#multi_frame_nowtime").value / cfg.multi_frame_fps) : render_p);
+    }
+
+    function getCanvasImage() {
+        return cv.toDataURL("image/png");
+    }
+
+    function update_resources_table() {
+        const tbody = $("#resources_table_tbody");
+        tbody.innerHTML = "";
+        for (const r of resources) {
+            const tr = document.createElement("tr");
+            const name_td = document.createElement("td");
+            const path_td = document.createElement("td");
+            name_td.innerText = r.name;
+            path_td.innerText = r.path;
+            tr.appendChild(name_td);
+            tr.appendChild(path_td);
+            tbody.appendChild(tr);
+        }
+    }
+
+    function load_resource(name, dataurl) {
+        const img = new Image();
+        img.src = dataurl;
+        console.log(name, img);
+        img.onload = () => {
+            window[name] = img;
+        };
+    }
+
+    const multi_frame_render_running_ids = new Set();
+
+    $("#render_method").addEventListener("change", update_render_method);
+    $("#multi_frame_fps").addEventListener("input", update_render_method);
+    $("#multi_frame_dur").addEventListener("input", update_render_method);
+    $("#multi_frame_nowtime").addEventListener("input", e => {
+        const cfg = get_render_cfg();
+        update_multi_render_nowtime_label();
+        running_multi_frame_render = false;
+        render_noce();
+    });
+
+    $("#render_button").addEventListener("click", async e => {
+        const res = await pywebview.api.render_click(get_render_cfg());
+
+        console.log(res);
+        if (res.code != 0) {
+            alert(`code: ${res.code}\nmsg: ${res.msg}`);
+            return;
+        }
+
+        eval(res.render_script);
+        window.render = render;
+
+        if (render_method == "one_frame") {
+            render_noce();
+        } else {
+            const r = (id) => {
+                const cfg = get_render_cfg();
+                if (cfg.render_method != "multi_frame" || !running_multi_frame_render || !multi_frame_render_running_ids.has(id)) return;
+                multi_frame_next_frame();
+                render_noce();
+                requestAnimationFrame(() => r(id));
+            };
+            id = Math.random();
+            multi_frame_render_running_ids.clear();
+            multi_frame_render_running_ids.add(id);
+            running_multi_frame_render = true;
+            set_multi_frame_frame_num(0);
+            r(id);
+        }
+    });
+
+    $("#add_resources_button").addEventListener("click", async e => {
+        const name = prompt("input resource name");
+        const res = await pywebview.api.add_resources_click();
+        console.log(res);
+
+        if (res.code != 0) {
+            if (res.code == 2) return;
+            alert(`code: ${res.code}\nmsg: ${res.msg}`);
+        }
+
+        resources.push({name, path: res.path});
+        update_resources_table();
+    });
+
+    $("#load_resources_button").addEventListener("click", async e => {
+        await pywebview.api.load_resources_click(resources);
+        alert("load resources success");
+    });
+
+    $("#export").addEventListener("click", async e => {
+        const res = await pywebview.api.export_click(get_render_cfg());
+        console.log(res);
+    });
+
+    update_render_method();
+</script>

@@ -1,0 +1,6 @@
+name: "phispler default resource pack"
+author: "phispler"
+description: "default resource pack for phispler"
+hitFx: [6, 10]
+holdAtlas: [50, 50]
+holdAtlasMH: [100, 100]

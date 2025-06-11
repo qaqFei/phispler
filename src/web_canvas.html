@@ -1,0 +1,949 @@
+<html>
+<meta name="viewport" content="initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="browsermode" content="application">
+<meta name="full-screen" content="yes" />
+<meta name="x5-fullscreen" content="true" />
+<meta name="x5-page-mode" content="app" />
+<meta name="360-fullscreen" content="true" />
+
+<body>
+    <svg width="0" height="0" xmlns="http://www.w3.org/2000/svg">
+        <filter id="textureLineColorFilter">
+            <feColorMatrix type="matrix" values="
+                1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 1 0
+            " id="colorMatrix"></feColorMatrix>
+        </filter>
+    </svg>
+    <div class="canvas-input-widgets"></div>
+    <div class="mask"></div>
+</body>
+
+</html>
+
+<style type="text/css">
+    body {
+        overflow-x: hidden;
+        overflow-y: hidden;
+        padding: 0;
+        border: 0;
+        margin: 0;
+        background-color: black;
+    }
+    
+    .main-canvas {
+        z-index: 1;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        position: absolute;
+    }
+    
+    .dialog-canvas {
+        z-index: 101;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+    }
+
+    .canvas-input-widgets {
+        background-color: transparent;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 102;
+    }
+    
+    .mask {
+        background-color: transparent;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 100;
+    }
+
+    ::highlight(highlight-1) {
+        color: #a8a8a8;
+        text-shadow: 0 0 10px #000000;
+    }
+
+    ::highlight(highlight-2) {
+        color: #54fcfc;
+        text-shadow: 0 0 10px #000000;
+    }
+
+    ::highlight(highlight-3) {
+        color: #fc5454;
+        text-shadow: 0 0 10px #000000;
+    }
+
+    ::highlight(highlight-4) {
+        color: #fcfc00;
+        text-shadow: 0 0 10px #000000;
+    }
+
+    ::highlight(highlight-5) {
+        color: #7e7e7e;
+        text-shadow: 0 0 10px #000000;
+    }
+</style>
+
+<script>
+    CanvasRenderingContext2D.prototype.reset = (
+        CanvasRenderingContext2D.prototype.reset ||
+        function () {
+            this.resetTransform();
+            this.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+    );
+
+    CanvasRenderingContext2D.prototype.roundRect = (
+        CanvasRenderingContext2D.prototype.roundRect ||
+        CanvasRenderingContext2D.prototype.rect
+    );
+</script>
+
+<script src="./js/glshader_ext.js"></script>
+<script src="./js/canvas2d_ext.js"></script>
+
+<script>
+    canvas_ele = document.createElement("canvas");
+    canvas_ele.className = "main-canvas";
+
+    dialog_canvas_ele = document.createElement("canvas");
+    dialog_canvas_ele.className = "dialog-canvas";
+
+    trigrid_cv = document.createElement("canvas");
+
+    document.body.appendChild(canvas_ele);
+    document.body.appendChild(dialog_canvas_ele);
+
+    mask = document.querySelector(".mask");
+    ctx = canvas_ele.getContext("2d");
+    dialog_canvas_ctx = dialog_canvas_ele.getContext("2d");
+    trigrid_ctx = trigrid_cv.getContext("2d");
+    jscodes = new Array();
+    resize_task = false;
+    lowquality_scale = 1.0;
+    lowquality_imjscvscale_x = 1.0;
+    lowquality_imjs_maxsize = 256;
+    enable_jscanvas_bitmap = false;
+    RPEVersion = -1;
+    usu169 = false;
+    canvasPosD = [0.0, 0.0];
+
+    const colorMatrix = document.getElementById("colorMatrix");
+    const lowquality_imweakmap = new WeakMap();
+    const letters = [
+        "a", "b", "c", "d", "e",
+        "f", "g", "h", "i", "j",
+        "k", "l", "m", "n", "o",
+        "p", "q", "r", "s", "t",
+        "u", "v", "w", "x", "y", "z",
+        "A", "B", "C", "D", "E",
+        "F", "G", "H", "I", "J",
+        "K", "L", "M", "N", "O",
+        "P", "Q", "R", "S", "T",
+        "U", "V", "W", "X", "Y", "Z"
+    ]
+    const dpr = window.devicePixelRatio || 1;
+
+    const None = null;
+    const True = true;
+    const False = false;
+    const inf = Infinity;
+    const nan = NaN;
+
+    function setColorMatrix(r, g, b) {
+        colorMatrix.setAttribute("values", `${r} 0 0 0 0 0 ${g} 0 0 0 0 0 ${b} 0 0 0 0 0 1 0`);
+    }
+
+    class Queue {
+        constructor() {
+            this.items = []
+        }
+
+        put(element) {
+            this.items.push(element)
+        }
+
+        get() {
+            return this.items.shift()
+        }
+        
+        empty() {
+            return this.items.length === 0
+        }
+    }
+
+    const mainShaderLoader = new ShaderLoader();
+
+    class TempCanvasDrawer {
+        constructor() {
+            this.cv = document.createElement("canvas");
+            this.ctx = this.cv.getContext("2d");
+            this._last_w = -1;
+            this._last_h = -1;
+        }
+
+        draw(im) {
+            const [w, h] = [im.width, im.height];
+            if (this._last_w !== w || this._last_h !== h) {
+                this.cv.width = w;
+                this.cv.height = h;
+                this._last_w = w;
+                this._last_h = h;
+            }
+
+            this.ctx.drawImage(im, 0, 0, w, h);
+        }
+    }
+
+    const mainTempCanvasDrawer = new TempCanvasDrawer();
+
+    function resizeCanvas(w, h, options) {
+        if (w === undefined || h === undefined) {
+            w = window.innerWidth;
+            h = window.innerHeight;
+        }
+
+        canvas_ele.width = w;
+        canvas_ele.height = h;
+        dialog_canvas_ele.width = w;
+        dialog_canvas_ele.height = h;
+        trigrid_cv.width = w;
+        trigrid_cv.height = h;
+        ctx = canvas_ele.getContext("2d", {...options});
+        dialog_canvas_ctx = dialog_canvas_ele.getContext("2d", {...options});
+        trigrid_ctx = trigrid_cv.getContext("2d", {...options});
+
+        if (usu169) {
+            const ratio = w / h;
+            let [dx, dy] = [0.0, 0.0];
+            if (ratio > 16 / 9) {
+                dx = (w - h * 16 / 9) / 2;
+            } else {
+                dy = (h - w / 16 * 9) / 2;
+            }
+
+            // 浮点数误差我超死你全家。
+            [dx, dy] = [parseInt(dx), parseInt(dy)];
+
+            canvasPosD = [dx, dy];
+            ctx.translate(dx, dy);
+            dialog_canvas_ctx.translate(dx, dy);
+            trigrid_ctx.canvas.width = w - 2 * dx;
+            trigrid_ctx.canvas.height = h - 2 * dy;
+        }
+    }
+
+    async function loadFont(family, url) {
+        let font = new FontFace(family, `url(${url})`);
+        document.fonts.add(await font.load());
+    }
+
+    function rgba2bgr(rgba_arr) {
+        const result = new Uint8Array(rgba_arr.length / 4 * 3);
+        for (let i = 0; i < rgba_arr.length; i += 4) {
+            result[i / 4 * 3] = rgba_arr[i + 2];
+            result[i / 4 * 3 + 1] = rgba_arr[i + 1];
+            result[i / 4 * 3 + 2] = rgba_arr[i];
+        }
+        return result;
+    }
+
+    function initUploadFrame(cache_limit, url) {
+        upload_frames = [];
+        upload_frame_cache_limit = cache_limit;
+        upload_frame_url = url;
+    }
+
+    upload_all_frames_promise = null;
+    async function upload_all_frames(last_call = false) {
+        frames = upload_frames.concat([]);
+        upload_frames.length = 0;
+
+        if (upload_all_frames_promise !== null) {
+            await upload_all_frames_promise;
+            upload_all_frames_promise = null;
+        }
+
+        pm = (async () => {
+            frames = frames.map(temp_ctx => rgba2bgr(temp_ctx.getImageData(0, 0, canvas_ele.width, canvas_ele.height).data));
+            return await fetch(upload_frame_url, {
+                method: "POST",
+                body: new Blob([
+                    new Uint32Array([
+                        frames.length,
+                        frames[0].length
+                    ]),
+                    ...frames
+                ])
+            })
+        })();
+
+        if (!last_call) upload_all_frames_promise = pm;
+        else await pm;
+    }
+
+    async function uploadFrame() {
+        try {
+            const temp_cv = document.createElement("canvas");
+            temp_cv.width = canvas_ele.width;
+            temp_cv.height = canvas_ele.height;
+            const temp_ctx = temp_cv.getContext("2d");
+            temp_ctx.drawImage(ctx.canvas, 0, 0);
+            upload_frames.push(temp_ctx);
+
+            if (upload_frames.length >= upload_frame_cache_limit) {
+                await upload_all_frames();
+            }
+        }
+        catch (e) {
+            console.error(e);
+            return await uploadFrame(url);
+        }
+    }
+
+    function makePlayKeyEvent(cb, rp) {
+        return function(e) {
+            if (e.isComposing || e.keyCode === 229) return;
+            if (!rp && e.repeat) return;
+            return cb(e);
+        }
+    }
+
+    async function loadrespackage(url, indexs) {
+        let respackage = await (await fetch(url)).blob();
+        let imnames = [];
+        for (i of indexs) {
+            let [pn, [pd, ps]] = i;
+            let resdata = respackage.slice(pd, pd + ps);
+            let im = new Image();
+            im.setAttribute("crossOrigin", "Anonymous");
+            im.src = URL.createObjectURL(resdata);
+            imnames.push(pn);
+            window[`${pn}_img`] = im;
+        }
+        return imnames;
+    }
+
+    function disable_cache_url(url) {
+        return `${url}?r=${Math.random()}`;
+    }
+
+    async function loadvideo(url, name) {
+        let video = document.createElement("video");
+        video.src = disable_cache_url(url);
+        video.preload = "auto";
+        video.muted = true;
+        video.loop = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        video.setAttribute("crossOrigin", "Anonymous");
+        window[name] = video;
+        await new Promise((resolve) => {
+            video.onloadeddata = resolve;
+        });
+    }
+
+    function setVideoTime(vdo, time) {
+        return new Promise((resolve) => {
+            vdo.currentTime = time;
+            vdo.onseeked = resolve;
+        });
+    }
+
+    function blurImg(im, r) {
+        let cv = document.createElement("canvas");
+
+        const _draw = () => {
+            console.log("draw", im.width, im.height, cv);
+            cv.width = im.width;
+            cv.height = im.height;
+            let ctx = cv.getContext("2d");
+            ctx.filter = `blur(${r}px)`;
+            ctx.drawImage(im, 0, 0);
+        }
+        _draw();
+
+        if (im instanceof HTMLImageElement) {
+            addFunc(im, "onload", _draw);
+        }
+        return cv;
+    }
+
+    function splitText(x0, y0, x1, y1, text, cv) {
+        texts = [];
+
+        function _splitTexts(element) {
+            let width = cv.measureText(element).width;
+            if (width >= (x1 - x0) * 0.95) {
+                for (let i = element.length - 1; i >= 0; i--) {
+                    let new_element = element.substring(0, i);
+                    if (cv.measureText(new_element).width < (x1 - x0) * 0.95) {
+                        nextString = element.substring(i);
+                        // i think this is not necessary
+                        // if (letters.indexOf(new_element[new_element.length - 1]) != -1 && letters.indexOf(nextString[0]) != -1) {
+                        //     nextString = new_element[new_element.length - 1] + nextString;
+                        //     new_element = new_element.substring(0, new_element.length - 1) + "-";
+                        // }
+                        texts.push(new_element);
+                        _splitTexts(nextString);
+                        return;
+                    }
+                }
+                texts.push(element);
+            } else {
+                texts.push(element);
+            }
+        }
+        text.split("\n").forEach(_splitTexts);
+        return texts;
+    }
+
+    function r2eval(c) {
+        try {
+            return eval(c);
+        } catch (e) {
+            alert(`卡车丢失！\n那个深入制谱器/模拟器心脏的bug，你无从得知！！！\n\nhas error: \n${e.msg}\n\n${e.stack}`);
+            console.log({
+                code: c,
+                err: e
+            });
+            throw e;
+        }
+    }
+
+    async function connectToSocketBridge(e) {
+        if (!e.isTrusted) return;
+        window.removeEventListener("touchstart", connectToSocketBridge);
+        const addr = prompt("please input the server address: ");
+        const port = 8080;
+        const socket = new WebSocket(`ws://${addr}:${port}`);
+        // const split_magic = "\x00";
+        let socket_started = false;
+
+        try {
+            await document.body.requestFullscreen();
+        } catch (e) {
+            const reqfs = document.body.requestFullscreen || document.body.webkitRequestFullscreen || document.body.mozRequestFullscreen || document.body.msRequestFullscreen;
+            const callback = () => {
+                reqfs.call(document.body);
+                window.removeEventListener("touchend", callback);
+            };
+            window.addEventListener("touchend", callback);
+        }
+
+        const msgs = new Queue();
+
+        (async () => {
+            while (true) {
+                if (msgs.empty() || !socket_started) {
+                    await async_sleep(1000 / 120);
+                    continue;
+                }
+                let msg = msgs.get();
+                socket.send(msg);
+            }
+        })();
+
+        window.pywebview = {
+            api: {
+                call_attr: (attr, ...args) => {
+                    msgs.put(JSON.stringify({
+                        type: "jsapi_callback",
+                        name: attr,
+                        args: args
+                    }));
+                }
+            }
+        }
+
+        socket.onopen = () => {
+            console.log("Connected to server");
+            socket_started = true;
+        };
+
+        socket.onmessage = async (event) => {
+            let data = JSON.parse(event.data);
+            switch (data.type) {
+                case "evaljs": {
+                    try {
+                        const result = r2eval(data.code);
+                        msgs.put(JSON.stringify({
+                            type: "evaljs_result",
+                            result: result,
+                            tid: data.tid
+                        }));
+                    } catch (e) {
+                        msgs.put(JSON.stringify({
+                            type: "jsapi_callback",
+                            name: "_socket_bridge_error",
+                            args: [data.code, e.msg + "\n" + e.stack]
+                        }));
+                    }
+                }
+            }
+        }
+    }
+
+    function setWlMoreChinese() {
+        const replaceMap = {
+            "0": "零", 
+            "1": "壹", "2": "贰", "3": "叁", "4": "肆",
+            "5": "伍", "6": "陆", "7": "柒", "8": "捌",
+            "9": "玖",
+
+            "A": "诶", "B": "比", "C": "西", "D": "的",
+            "E": "伊", "F": "阿福", "G": "据", "H": "爱趣",
+            "I": "爱", "J": "杰", "K": "剋", "L": "艾路",
+            "M": "阿姆", "N": "嗯", "O": "欧", "P": "皮",
+            "Q": "可由", "R": "啊", "S": "埃斯", "T": "提",
+            "U": "尤", "V": "维", "W": "打不溜", "X": "埃克斯",
+            "Y": "歪", "Z": "滋",
+
+            "~": "波浪", "!": "感叹号", "@": "艾特", "#": "井号",
+            "$": "美元", "%": "百分号", "^": "脱字符", "&": "和号",
+            "*": "星号", "(": "左括号", ")": "右括号", "+": "加号",
+            "-": "减号", "_": "下划线", "=": "等号", ":": "冒号",
+            ";": "分号", "'": "单引号", "\"": "双引号", ",": "逗号",
+            ".": "点", "/": "斜杠", "\\": "反斜杠", "|": "竖线",
+            "?": "问号", "{": "左花括号", "}": "右花括号", "[": "左方括号",
+            "]": "右方括号", "`": "反引号", "<": "小于号", ">": "大于号"
+        };
+
+        const wlmc_text_processer = (text) => {
+            text = text.toUpperCase();
+            for (k in replaceMap) {
+                text = text.replaceAll(k, replaceMap[k]);
+            }
+            return text;
+        };
+
+        CanvasRenderingContext2D.prototype._wlMoreChinese_fillText = CanvasRenderingContext2D.prototype.fillText;
+        CanvasRenderingContext2D.prototype._wlMoreChinese_strokeText = CanvasRenderingContext2D.prototype.strokeText;
+        CanvasRenderingContext2D.prototype._wlMoreChinese_measureText = CanvasRenderingContext2D.prototype.measureText;
+
+        CanvasRenderingContext2D.prototype.fillText = function(text, ...args) {
+            return this._wlMoreChinese_fillText(wlmc_text_processer(text), ...args);
+        }
+
+        CanvasRenderingContext2D.prototype.strokeText = function(text, ...args) {
+            return this._wlMoreChinese_strokeText(wlmc_text_processer(text), ...args);
+        }
+
+        CanvasRenderingContext2D.prototype.measureText = function(text, ...args) {
+            return this._wlMoreChinese_measureText(wlmc_text_processer(text), ...args);
+        }
+    }
+
+    function deleteLowQualityImage(im) {
+        if (lowquality_imweakmap.has(im)) lowquality_imweakmap.delete(im);
+    }
+
+    function toLowQualityImage(im) {
+        if (im.tagName && ["videos", "canvas"].includes(im.tagName.toLowerCase())) return im;
+        if (im.nobitmap_tag) return im;
+        if (im._lowquality_pcsing) return im;
+        if (lowquality_imweakmap.has(im)) return lowquality_imweakmap.get(im);
+
+        addFunc(im, "onload", () => deleteLowQualityImage(im), "tag-tlqi");
+
+        if (
+            lowquality_imjscvscale_x != 1.0
+            && im.width > lowquality_imjs_maxsize
+            && im.height > lowquality_imjs_maxsize
+        ) {
+            im._lowquality_pcsing = true;
+            (async () => {
+                let tempcv = document.createElement("canvas");
+                tempcv.width = Math.max(Math.floor(im.width / lowquality_imjscvscale_x), 1);
+                tempcv.height = Math.max(Math.floor(im.height / lowquality_imjscvscale_x), 1);
+                tempctx = tempcv.getContext("2d").drawImage(im, 0, 0, tempcv.width, tempcv.height);
+                lowquality_imweakmap.set(
+                    im,
+                    enable_jscanvas_bitmap ? await createImageBitmap(tempcv) : tempcv
+                );
+                im._lowquality_pcsing = undefined;
+            })();
+        }
+        else if (enable_jscanvas_bitmap && !(im instanceof ImageBitmap)) {
+            im._lowquality_pcsing = true;
+            (async () => {
+                let tempcv = document.createElement("canvas");
+                tempcv.width = im.width;
+                tempcv.height = im.height;
+                tempctx = tempcv.getContext("2d").drawImage(im, 0, 0, tempcv.width, tempcv.height);
+                lowquality_imweakmap.set(im, await createImageBitmap(tempcv));
+                im._lowquality_pcsing = undefined;
+            })();
+        }
+
+        return im;
+    }
+
+    function addFunc(obj, name, newfunc, options) {
+        options = options ? options : {};
+        tag = options.tag;
+
+        if (tag) {
+            if (obj[`_addfunc_has_${tag}`]) return;
+            obj[`_addfunc_has_${tag}`] = true;
+        }
+
+        if (obj[`_addfunc_${name}`] === undefined) {
+            obj[`_addfunc_${name}`] = [];
+        }
+
+        obj[`_addfunc_${name}`].push({
+            func: newfunc,
+            options: options
+        });
+
+        if (!obj[name]) {
+            obj[name] = function (...args) {
+                for (const func of obj[`_addfunc_${name}`]) {
+                    func.func(...args);
+
+                    if (func.options.once) {
+                        obj[`_addfunc_${name}`].splice(obj[`_addfunc_${name}`].indexOf(func), 1);
+                    }
+                }
+            }
+        }
+    }
+
+    async function async_sleep(ms) {
+        await new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    function moveCursorToEnd(element) {
+        const textNode = element.childNodes[0];
+        if (!textNode) return;
+        
+        const range = document.createRange();
+        const selection = window.getSelection();
+        range.setStart(textNode, textNode.length);
+        range.setEnd(textNode, textNode.length);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    }
+
+    const canvasInputEles = new Map();
+    function updateCanvasInput(id, x, y, width, height, font, default_text, font_color) {
+        if (!canvasInputEles.has(id)) {
+            const ele = document.createElement("div");
+
+            ele.contentEditable = true;
+            ele.spellcheck = false;
+            ele.tabindex = 0;
+
+            ele.style.position = "absolute";
+            ele.style.outline = "none";
+            ele.style.border = "none";
+            ele.style.background = "transparent";
+            ele.style.overflowX = "auto";
+            ele.style.whiteSpace = "nowrap";
+            ele.style.scrollbarWidth = "none";
+            ele.style.msOverflowStyle = "none";
+
+            ele.style.display = "flex";
+            ele.style.alignItems = "center";
+
+            if (default_text) {
+                ele.textContent = default_text;
+                ele.needMoveCursorToEnd = true;
+
+                ele.addEventListener("focus", () => {
+                    if (ele.needMoveCursorToEnd) {
+                        moveCursorToEnd(ele);
+                        ele.needMoveCursorToEnd = false;
+                    }
+                });
+
+                ele.addEventListener("input", () => {
+                    ele.needMoveCursorToEnd = false;
+                })
+            }
+
+            ele.addEventListener("paste", e => {
+                e.preventDefault();
+                const text = (e.clipboardData || window.clipboardData).getData("text/plain").replaceAll("\n", " ");
+                document.execCommand("insertText", false, text);
+            });
+
+            ele.addEventListener("keydown", e => {
+                if (e.key === "Enter") {
+                    e.preventDefault();
+                    e.blur();
+                }
+            });
+
+            document.querySelector(".canvas-input-widgets").appendChild(ele);
+            canvasInputEles.set(id, ele);
+        }
+
+        const ele = canvasInputEles.get(id);
+        ele.style.left = x + "px";
+        ele.style.top = y + "px";
+        ele.style.width = width + "px";
+        ele.style.height = height + "px";
+        ele.style.font = font;
+        ele.style.color = font_color;
+
+        return ele.textContent;
+    }
+
+    function removeCanvasInput(id) {
+        if (!canvasInputEles.has(id)) return;
+        canvasInputEles.get(id).remove();
+        canvasInputEles.delete(id);
+    }
+
+    function setCanvasInputText(id, value) {
+        if (!canvasInputEles.has(id)) return;
+        canvasInputEles.get(id).textContent = value;
+    }
+
+    function setCanvasInputFocus(id) {
+        if (!canvasInputEles.has(id)) return;
+        canvasInputEles.get(id).focus();
+    }
+
+    function setCanvasInputHighlight(id, lights) {
+        if (!canvasInputEles.has(id)) return;
+        const ele = canvasInputEles.get(id);
+
+        CSS.highlights.entries().forEach((value, index) => {
+            const [key, hl] = value;
+            const need_delete_ranges = [];
+            hl.forEach(range => {
+                if (range.input_id === id) need_delete_ranges.push(range);
+            });
+            need_delete_ranges.forEach(range => hl.delete(range));
+        });
+
+        try {
+            const highlight_objs = new Map();
+
+            for (const hl of lights) {
+                if (!highlight_objs.has(hl[2])) highlight_objs.set(hl[2], []);
+                const textNode = ele.childNodes[0];
+                
+                const r = new Range();
+                r.setStart(textNode, hl[0]);
+                r.setEnd(textNode, hl[1]);
+                r.input_id = id;
+                highlight_objs.get(hl[2]).push(r);
+            }
+
+            highlight_objs.forEach((ranges, color) => {
+                if (!CSS.highlights.has(color)) {
+                    CSS.highlights.set(color, new Highlight());
+                }
+                const hl = CSS.highlights.get(color);
+                ranges.forEach(range => hl.add(range));
+            });
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    Image.prototype.enable_lazy_load = function (real_srcs) {
+        this._enabled_lazy_load = true;
+        this._lazy_realsrcs = real_srcs;
+        this._lazy_load_index = -1;
+        this._lazy_loaded = false;
+        this._lazy_load_started = false;
+        this._lazt_load_firstok = false;
+    }
+
+    Image.prototype.lazy_load = function () {
+        if (!this._enabled_lazy_load || this._lazy_loaded || this._lazy_load_started) return;
+        this._lazy_load_started = true;
+
+        addFunc(this, "onload", async () => {
+            this._lazy_load_index++;
+            if (this._lazy_load_index == 1) this._lazt_load_firstok = true;
+
+            if (this._lazy_load_index >= this._lazy_realsrcs.length) {
+                this.__drawImage__ = undefined;
+                this._lazy_loaded = true;
+                return;
+            }
+
+            if (this._lazy_load_index != 0) {
+                const tempcv = document.createElement("canvas");
+                tempcv.width = this.width;
+                tempcv.height = this.height;
+                tempcv.getContext("2d").drawImage(this, 0, 0, tempcv.width, tempcv.height);
+                this.__drawImage__ = () => tempcv;
+                await async_sleep(250);
+            }
+
+            this.src = disable_cache_url(this._lazy_realsrcs[this._lazy_load_index]);
+        });
+
+        this.onload();
+    }
+
+    CanvasRenderingContext2D.prototype._drawImage = CanvasRenderingContext2D.prototype.drawImage;
+
+    CanvasRenderingContext2D.prototype.drawImage = function(...args) {
+        args[1] += this.drawImageDx ? this.drawImageDx : 0;
+        args[2] += this.drawImageDy ? this.drawImageDy : 0;
+
+        if (args[0].__drawImage__) {
+            if (args.length <= 3) {
+                args.push(args[0].width);
+                args.push(args[0].height);
+            }
+
+            args[0] = args[0].__drawImage__();
+        }
+
+        let need_logerr = true;
+
+        if (args[0]._enabled_lazy_load && !args[0]._lazy_load_started) {
+            args[0].lazy_load();
+            args[0] = null;
+            need_logerr = false;
+        }
+
+        if (args[0] && args[0]._enabled_lazy_load && args[0]._lazy_load_started &&  !args[0]._lazt_load_firstok) {
+            args[0] = null;
+            need_logerr = false;
+        }
+
+        try {
+            if (args[0] === null) throw "";
+            args[0] = toLowQualityImage(args[0]);
+            if (!this.globalAlpha) return;
+            return this._drawImage(...args);
+        } catch (e) {
+            if (need_logerr) console.error(e, args);
+            this.save();
+            this.fillStyle = "rgb(32, 32, 32)";
+            this.fillRect(args[1], args[2], args[3], args[4]);
+            this.restore();
+            return;
+        }
+    }
+
+    CanvasRenderingContext2D.prototype.loadArrowImage = function () {
+        return new Promise((resolve, reject) => {
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = reject;
+            img.src = "./resources/arrow.png";
+            this.arrowImage = img;
+            this.enable_presentation_arrow = true;
+        })
+    }
+
+    CanvasRenderingContext2D.prototype.onframeok = function () {
+        if (!this.enable_presentation_arrow) return;
+        if (isNaN(mouse_now_x) || isNaN(mouse_now_y)) return;
+        const [w, h] = [this.canvas.width, this.canvas.height];
+
+        this.drawImage(
+            this.arrowImage,
+            mouse_now_x,
+            mouse_now_y - (w + h) / 150,
+            (w + h) / 50,
+            (w + h) / 50
+        );
+    }
+
+    window.addEventListener("touchstart", connectToSocketBridge);
+
+    const proxyTouchEvent = function (from, to) {
+        window.addEventListener(from, (e) => {
+            if (!e.isTrusted) return;
+            let touch = e.changedTouches[0];
+            let mouseEvent = new MouseEvent(to, {
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+                buttons: 1
+            });
+            window.dispatchEvent(mouseEvent);
+        });
+    };
+    
+    proxyTouchEvent("touchstart", "mousedown");
+    proxyTouchEvent("touchmove", "mousemove");
+    proxyTouchEvent("touchend", "mouseup");
+
+    const proxyMouseEvent = function (from, to) {
+        window.addEventListener(from, (e) => {
+            if (!e.isTrusted) return;
+            let touchEvent = new TouchEvent(to, {
+                changedTouches: [new Touch({
+                    target: e.target,
+                    identifier: 1,
+                    clientX: e.clientX,
+                    clientY: e.clientY
+                })]
+            });
+            window.dispatchEvent(touchEvent);
+        });
+    };
+
+    // proxyMouseEvent("mousedown", "touchstart");
+    // proxyMouseEvent("mousemove", "touchmove");
+    // proxyMouseEvent("mouseup", "touchend");
+
+    const fixEventPosition = (x, y) => [x * dpr - canvasPosD[0], y * dpr - canvasPosD[1]];
+    const proxyNeedPositionEvent = function (from, to, cls) {
+        const othernames = ["altKey", "bubbles", "button", "buttons", "cancelBubble", "cancelable", "clientX", "clientY", "composed", "ctrlKey", "currentTarget", "defaultPrevented", "detail", "eventPhase", "fromElement", "layerX", "layerY", "metaKey", "movementX", "movementY", "offsetX", "offsetY", "pageX", "pageY", "relatedTarget", "returnValue", "screenX", "screenY", "shiftKey", "sourceCapabilities", "srcElement", "target", "timeStamp", "toElement", "type", "view", "which", "x", "y"];
+        window.addEventListener(from, (e) => {
+            const [x, y] = fixEventPosition(e.x, e.y);
+            const [clientX, clientY] = fixEventPosition(e.clientX, e.clientY);
+            const eventValues = {
+                ...(() => {
+                    const result = {};
+                    for (const name of othernames) result[name] = e[name];
+                    return result;
+                })(),
+                x: x, y: y,
+                clientX: clientX, clientY: clientY
+            };
+            const newEvent = new cls(to, eventValues);
+            window.dispatchEvent(newEvent);
+        });
+    }
+
+    proxyNeedPositionEvent("mousedown", "mousedown-np", MouseEvent);
+    proxyNeedPositionEvent("mousemove", "mousemove-np", MouseEvent);
+    proxyNeedPositionEvent("mouseup", "mouseup-np", MouseEvent);
+    proxyNeedPositionEvent("click", "click-np", MouseEvent);
+
+    var mouse_now_x = NaN;
+    var mouse_now_y = NaN;
+
+    window.addEventListener("mousemove-np", (e) => {
+        mouse_now_x = e.clientX;
+        mouse_now_y = e.clientY;
+    })
+
+    // window.addEventListener("touchstart", (e) => {
+    //     try {pywebview.api.call_attr("PhigrosPlay_KeyDown", new Date().getTime() / 1000, letters[e.changedTouches[0].identifier % letters.length])}
+    //     catch (e) {}
+    // });
+    // window.addEventListener("touchend", (e) => {
+    //     try {pywebview.api.call_attr("PhigrosPlay_KeyUp", new Date().getTime() / 1000, letters[e.changedTouches[0].identifier % letters.length])}
+    //     catch (e) {}
+    // });
+</script>

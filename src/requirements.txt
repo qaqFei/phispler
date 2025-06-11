@@ -1,0 +1,13 @@
+Pillow==11.0.0
+pywin32==308
+pydub==0.25.1
+numba==0.61.2
+opencv-python-headless==4.10.0.84
+numpy==2.0.2
+pywebview==5.3.1
+librosa==0.10.2.post1
+requests==2.32.2
+PyYAML==6.0.2
+pygame==2.6.1
+websockets==13.1
+midi-parse==0.0.7
