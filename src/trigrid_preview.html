@@ -136,7 +136,7 @@
     const draw = () => {
         ctx.clear();
         ctx.drawImage(trigrid_base, 0, 0, cv.width, cv.height);
-        mainShaderLoader.renderToCanvas(ctx, "trigrid", setting_widgets.get([
+        const uniforms = setting_widgets.get([
             "tex_size",
             "base_color",
             "face_color",
@@ -147,7 +147,9 @@
             "glow_brightness",
             "always_on",
             "glow_ooroff"
-        ]));
+        ]);
+        uniforms.__enableAlpha = true;
+        mainShaderLoader.renderToCanvas(ctx, "trigrid", uniforms);
 
         ctx.save();
         ctx.globalCompositeOperation = "destination-over";
