@@ -621,7 +621,8 @@ def drawFsBgdeCoration(trigrid_cfg: typing.Optional[dict] = None):
             "glow_color": [0.383, 0.8843222, 1, 1],
             "glow_brightness": 1.3,
             
-            "t": time.perf_counter()
+            "t": time.perf_counter(),
+            "__enableAlpha": True
         }
         
         if trigrid_cfg is not None:
