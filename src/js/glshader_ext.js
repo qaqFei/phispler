@@ -10,7 +10,6 @@
     }
 
     gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
 
     const positions = [
         -1, 1,
@@ -98,7 +97,7 @@ void main() {
 }
     `);
 
-    const _seted_locatinos = new Map();
+    const _seted_locations = new Map();
 
     const _set_location = (location, value) => {
         if (typeof value === "boolean") {
@@ -107,23 +106,28 @@ void main() {
             gl[`uniform${value.length}fv`](location, value);
         }
 
-        _seted_locatinos.set(location, value);
+        _seted_locations.set(location, value);
     }
 
     const _reset_locations = () => {
-        if (!_seted_locatinos.size) return;
-        _seted_locatinos.forEach((value, location) => {
+        if (!_seted_locations.size) return;
+        _seted_locations.forEach((value, location) => {
             if (typeof value === "boolean") {
                 gl.uniform1i(location, 0);
             } else {
                 gl[`uniform${value.length}fv`](location, new Array(value.length).fill(0));
             }
         });
-        _seted_locatinos.clear();
+        _seted_locations.clear();
     }
 
     window["drawGL"] = (program, im, uniforms) => {
         if (program.invtag) program = default_program;
+
+        if (uniforms.__enableAlpha) {
+            gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+        }
+
         gl.useProgram(program);
         for (const uniform_key in uniforms) {
             let value = uniforms[uniform_key];
@@ -141,6 +145,11 @@ void main() {
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
         _reset_locations(program);
+
+        if (uniforms.__enableAlpha) {
+            gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+        }
+
         return cv;
     };
 })();
